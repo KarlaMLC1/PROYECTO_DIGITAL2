@@ -1,0 +1,1036 @@
+//***************************************************************************************************************************************
+// Librerías e Inclusión de Archivos
+//***************************************************************************************************************************************
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <TM4C123GH6PM.h>
+#include "inc/hw_ints.h"
+#include "inc/hw_memmap.h"
+#include "inc/hw_types.h"
+#include "driverlib/debug.h"
+#include "driverlib/gpio.h"
+#include "driverlib/interrupt.h"
+#include "driverlib/rom_map.h"
+#include "driverlib/rom.h"
+#include "driverlib/sysctl.h"
+#include "driverlib/timer.h"
+#include "font.h"
+#include "lcd_registers.h"
+#include <SD.h>
+#include <SPI.h>
+
+//***************************************************************************************************************************************
+// Variables Globales
+//***************************************************************************************************************************************
+
+File resultadoFile; // Objeto para el archivo de resultados
+String result; // Declaración de la variable 'result'
+File root; // Ruta para SD
+
+int DPINS[] = {PB_0, PB_1, PB_2, PB_3, PB_4, PB_5, PB_6, PB_7};
+
+#define LCD_RST PD_0
+#define LCD_CS PD_1
+#define LCD_RS PD_2
+#define LCD_WR PD_3
+#define LCD_RD PE_1
+  
+//***************************************************************************************************************************************
+// Funciones Prototipos
+//***************************************************************************************************************************************
+void LCD_Init(void);
+void LCD_CMD(uint8_t cmd);
+void LCD_DATA(uint8_t data);
+void SetWindows(unsigned int x1, unsigned int y1, unsigned int x2, unsigned int y2);
+void LCD_Clear(unsigned int c);
+void H_line(unsigned int x, unsigned int y, unsigned int l, unsigned int c);
+void V_line(unsigned int x, unsigned int y, unsigned int l, unsigned int c);
+void Rect(unsigned int x, unsigned int y, unsigned int w, unsigned int h, unsigned int c);
+void FillRect(unsigned int x, unsigned int y, unsigned int w, unsigned int h, unsigned int c);
+void LCD_Print(String text, int x, int y, int fontSize, int color, int background);
+void LCD_Bitmap(unsigned int x, unsigned int y, unsigned int width, unsigned int height, unsigned char bitmap[]);
+void LCD_Sprite(int x, int y, int width, int height, unsigned char bitmap[],int columns, int index, char flip, char offset);
+bool Collision(int x1, int y1, int w1, int h1, int x2, int y2, int w2, int h2);
+
+//***************************************************************************************************************************************
+// Variables de Juego
+//***************************************************************************************************************************************
+
+bool win = false;
+//MODO MOSTRADO EN LA PANTALLA
+char modo = 0;
+
+
+  int linea_x1 = 0;
+  int linea_x2 = 319; // Ancho de la pantalla
+  int linea_y = 185; // Altura deseada para la línea
+  int linea_color = 0x4321; // Color de la línea (blanco en este caso)
+
+  int linea_x12 = 0;
+  int linea_x22 = 319; // Ancho de la pantalla
+  int linea_y2 = 82; // Altura deseada para la línea
+
+extern uint8_t monoBitmap[]; // cargar bitmap desde memoria flash
+extern uint8_t mono1Bitmap[];
+extern uint8_t bananaBitmap[];
+
+//***************************************************************************************************************************************
+// Estructuras
+//***************************************************************************************************************************************
+
+struct Sprite { // estructura para sprites
+  int x; // posicion x
+  int y; // posicion y
+  int width; // ancho de bitmap
+  int height; // altura de bitmap
+  int columns; // columna sprite sheet
+  int index; // indice sprite sheet
+  int flip; // voltear imagen
+  int offset; // desfase
+} mono, mono1, banana1, banana2, banana3, banana4, banana5;
+
+
+struct Rectangle{ // estructura para rectangulos
+  int x; // posicion x
+  int y; // posicion y
+  int width; // ancho de rectángulo
+  int height; // altura de rectángulo
+  int color; // color de relleno  
+} rect;
+
+struct Rectangle1{ // estructura para rectangulos
+  int x; // posicion x
+  int y; // posicion y
+  int width; // ancho de rectángulo
+  int height; // altura de rectángulo
+  int color; // color de relleno  
+} rect1;
+
+struct Rectangle2{ // estructura para rectangulos
+  int x; // posicion x
+  int y; // posicion y
+  int width; // ancho de rectángulo
+  int height; // altura de rectángulo
+  int color; // color de relleno  
+} rect2;
+
+struct Rectangle3{ // estructura para rectangulos
+  int x; // posicion x
+  int y; // posicion y
+  int width; // ancho de rectángulo
+  int height; // altura de rectángulo
+  int color; // color de relleno  
+} rect3;
+
+//***************************************************************************************************************************************
+// Variables de Control del Juego
+//***************************************************************************************************************************************
+
+bool rectUp = false; // dirección rectángulo
+bool rectUp2 = false; // dirección rectángulo
+bool rectUp3 = false; // dirección rectángulo
+bool rectUp4 = false; // dirección rectángulo
+bool collision1 = false; // detección de colisión
+bool collision2 = false; // detección de colisión
+bool collision3 = false; // detección de colisión
+bool collision4 = false; // detección de colisión
+bool collision1_ = false; // detección de colisión
+bool collision2_ = false; // detección de colisión
+bool collision3_ = false; // detección de colisión
+bool collision4_ = false; // detección de colisión
+
+//***************************************************************************************************************************************
+// Funciones de Mensajes y Resultados
+//***************************************************************************************************************************************
+
+void ShowGameOverMessage() {
+  LCD_Clear(0x0000); // Borra la pantalla con fondo negro
+  String message = "GAME OVER";
+  String ronda = "Espera para otra ronda...";  
+  int fontSize = 2;
+  int textColor = 0xFFFF; // Color blanco
+  int backgroundColor = 0x0000; // Color negro
+  int x = 90; // Posición X del mensaje
+  int y = 100; // Posición Y del mensaje
+  LCD_Print(message, x, y, fontSize, textColor, backgroundColor);
+  LCD_Print(ronda, 70, 170, 1, 0xEEDF02, 0x0000);
+}
+
+void ShowWinMessage() {
+  LCD_Clear(0x0000); // Borra la pantalla con fondo negro
+  String message = "WIN";
+  String nextLevel = "Preparando siguiente nivel...";  
+  int fontSize = 2;
+  int textColor = 0xFFFF; // Color blanco
+  int backgroundColor = 0x0000; // Color negro
+  int x = 100; // Posición X del mensaje
+  int y = 100; // Posición Y del mensaje
+  LCD_Print(message, x, y, fontSize, textColor, backgroundColor);
+  LCD_Print(nextLevel, 40, 170, 1, 0xEEDF02, 0x0000);
+
+}
+
+void ShowResult(String result) {
+  LCD_Clear(0x0000); // Borra la pantalla con fondo negro
+
+  // Muestra el resultado (Empate o nombre del jugador)
+  int fontSize = 2;
+  int textColor = 0xffff; // Color blanco
+  int backgroundColor = 0x0000; // Color negro
+  int x = 50; // Posición X del mensaje
+  int y = 100; // Posición Y del mensaje
+  LCD_Print(result, x, y, fontSize, textColor, backgroundColor);
+}
+
+//Ecuacion que determina la colision
+bool Collision(int x1, int y1, int w1, int h1, int x2, int y2, int w2, int h2){
+  return (x1 < x2 + w2) && (x1+ w1 > x2) && (y1 < y2 + h2) && (y1 + h1 > y2);
+}
+
+//***************************************************************************************************************************************
+// Funciones para SD
+//***************************************************************************************************************************************
+void obtener_titulo1(void);
+void obtener_titulo2(void);
+void obtener_titulo2(void);
+void openSDformat(unsigned char L[], unsigned long SIZE, char* a);
+int ACII_HEX(char *puntero);
+void printDirectory(File dir, int numTabs);
+
+String text1, text2, text3;
+
+void obtener_titulo1(void) {
+  unsigned char titulo1[11000] = {0};
+  openSDformat(titulo1, 11001, "TITULO1.txt");
+  LCD_Bitmap(60, 40, 110, 50, titulo1);
+
+}
+
+void obtener_titulo2(void) {
+  unsigned char titulo2[11000] = {0};
+  openSDformat(titulo2, 11001, "TITULO2.txt");
+  LCD_Bitmap(45, 95, 80, 40, titulo2);
+
+}
+
+void obtener_titulo3(void) {
+  unsigned char titulo3[11000] = {0};
+  openSDformat(titulo3, 11001, "TITULO3.txt");
+  LCD_Bitmap(45, 95, 80, 40, titulo3);
+}
+
+
+unsigned long previousMillis = 0;  
+const long interval = 42;
+//***************************************************************************************************************************************
+// Configuración
+//***************************************************************************************************************************************
+void setup() {
+  
+  SysCtlClockSet(SYSCTL_SYSDIV_2_5|SYSCTL_USE_PLL|SYSCTL_OSC_MAIN|SYSCTL_XTAL_16MHZ);
+  Serial.begin(9600);
+   SPI.setModule(0);      // COMUNICACIÓN SPI EN EL MÓDULO 0
+  GPIOPadConfigSet(GPIO_PORTB_BASE, 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7, GPIO_STRENGTH_8MA, GPIO_PIN_TYPE_STD_WPU);
+  Serial.println("Start");
+  LCD_Init();
+  LCD_Clear(0x00);
+//botones  
+  pinMode(PUSH1, INPUT_PULLUP); // botones integrados con como entrada pull-up
+  pinMode(PUSH2, INPUT_PULLUP);
+
+   //INICIALIZACION DE LA MEMORIA SD
+  pinMode(10, OUTPUT);
+
+   if (!SD.begin(32)) {
+    Serial.println("initialization failed!");
+    return;
+  }
+  Serial.println("initialization done.");
+
+  root = SD.open("/");
+
+  printDirectory(root, 0);
+
+  Serial.println("done!");
+
+//***************************************************************************************************************************************
+// Jugadores, Bananas y Rectangulos
+//***************************************************************************************************************************************
+
+  mono.x = 0;
+  mono.y = 50;
+  mono.width = 20;
+  mono.height = 35;
+  mono.columns = 1;
+  mono.index = 0;
+  mono.flip = 0;
+  mono.offset = 0;
+
+
+  mono1.x = 0;
+  mono1.y = 150;
+  mono1.width = 20;
+  mono1.height = 32;
+  mono1.columns = 1;
+  mono1.index = 0;
+  mono1.flip = 1;
+  mono1.offset = 0;
+
+  banana1.x = 70;
+  banana1.y = 5;
+  banana1.width = 26;
+  banana1.height = 27;
+  banana1.columns = 1;
+  banana1.index = 0;
+  banana1.flip = 0;
+  banana1.offset = 0;
+
+  banana2.x = 140;
+  banana2.y = 100;
+  banana2.width = 26;
+  banana2.height = 27;
+  banana2.columns = 1;
+  banana2.index = 0;
+  banana2.flip = 0;
+  banana2.offset = 0;
+
+  banana3.x = 210;
+  banana3.y = 5;
+  banana3.width = 26;
+  banana3.height = 27;
+  banana3.columns = 1;
+  banana3.index = 0;
+  banana3.flip = 0;
+  banana3.offset = 0;
+
+  banana4.x = 280;
+  banana4.y = 100;
+  banana4.width = 26;
+  banana4.height = 27;
+  banana4.columns = 1;
+  banana4.index = 0;
+  banana4.flip = 0;
+  banana4.offset = 0;
+
+  banana5.x = 70;
+  banana5.y = 5;
+  banana5.width = 26;
+  banana5.height = 27;
+  banana5.columns = 1;
+  banana5.index = 0;
+  banana5.flip = 0;
+  banana5.offset = 0;
+
+  rect.x = 70;
+  rect.y = 5;
+  rect.width = 30;
+  rect.height = 30;
+  rect.color = 0xFFC300;
+
+  rect1.x = 140;
+  rect1.y = 100;
+  rect1.width = 30;
+  rect1.height = 30;
+  rect1.color = 0xFFC300;
+
+  rect2.x = 210;
+  rect2.y = 5;
+  rect2.width = 30;
+  rect2.height = 30;
+  rect2.color = 0xFFC300;
+
+  rect3.x = 280;
+  rect3.y = 100;
+  rect3.width = 30;
+  rect3.height = 30;
+  rect3.color = 0xFFC300;
+
+}
+
+
+//***************************************************************************************************************************************
+// Menú
+//***************************************************************************************************************************************
+
+void loop() {
+  switch (modo) {
+    case 0:
+      E1();   //CORRESPONDE AL ESTADO DE LA PANTALLA DE INICIO
+      break;
+    case 1:
+      E2();   //CORRESPONDE AL ESTADO DEL MENU PRINCIPAL
+      break;
+  }
+}
+//***************************************************************************************************************************************
+// Pantalla de bienvenida
+//***************************************************************************************************************************************
+
+void E1(void) {
+  // Titulo del juego
+
+  String presentan = "Creadoras de:";
+  String subtitulo = "Proyecto 2";
+  
+  obtener_titulo1();
+  LCD_Print(presentan, 110, 60, 1, 0xffff, 0x0000);
+  obtener_titulo2();
+   obtener_titulo3();
+  LCD_Print(subtitulo, 70, 170, 2, 0xffff, 0x0000);
+  
+  // Esperar hasta que se presione un botón
+  while (digitalRead(PUSH1) == HIGH && digitalRead(PUSH2) == HIGH) {
+    // Esperar
+  }
+  
+  // Cambiar al estado E2
+  modo = 1;
+
+  LCD_Clear(0x0000); // Limpiar la pantalla
+}
+
+//***************************************************************************************************************************************
+// Estructura del juego 
+//***************************************************************************************************************************************
+
+void E2(void){
+  
+  unsigned long currentMillis = millis();
+for (int i = 0; i <= 12; i++) {
+    H_line(linea_x1, linea_y + i, linea_x2 - linea_x1, linea_color);
+    H_line(linea_x12, linea_y2 + i, linea_x22 - linea_x12, linea_color);
+}
+
+  
+  // actualización de frame cada 42ms = 24fps
+  if (currentMillis - previousMillis >= interval) {
+          previousMillis = currentMillis;
+          bool move1 = !digitalRead(PUSH1); // lectura de entradas
+          bool move2 = !digitalRead(PUSH2);
+         
+
+          if (move1) { // modificación de atributos de sprite
+            mono.x += 4;
+            mono.index++;
+            mono.index %= 3;
+            mono.flip = 1;
+
+          }
+          if (mono.x + mono.width >= 320 || mono1.x + mono1.width >= 320) {
+            win = true;
+          }
+          
+
+          if (move2) {
+           mono1.x += 4;
+           mono1.index++;
+           mono1.index %= 3;
+           mono1.flip = 0;
+          }
+
+          
+         
+          //RECTANGULO VERDE
+          if (rectUp) { // movimiento de rectángulo
+            FillRect(rect.x, rect.y + rect.height - 5, rect.width, 5, 0x0000); // se colorea resto de rectángulo del frame anterior
+            rect.y-= 5;
+            if (rect.y <= 0) {
+              rectUp = false;
+            }
+          }
+          else {
+            FillRect(rect.x, rect.y, rect.width, 5, 0x0000);
+            rect.y+= 5;
+            if (rect.y >= 200) {
+              rectUp = true;
+            }
+            if (collision1) { // se reemplaza el color al colisionar
+            rect.color = 0xF800;
+            String ();
+          }
+          else {
+            LCD_Bitmap(banana1.x, banana1.y, banana1.width, banana1.height, bananaBitmap);
+          }
+          FillRect(rect.x, rect.y, rect.width, rect.height, rect.color);
+          }  
+          collision1 = Collision(mono.x, mono.y, mono.width, mono.height,rect.x, rect.y, rect.width, rect.height); // detección de colisión
+          //collision1 = Collision(mono1.x, mono1.y, mono1.width, mono1.height,rect.x, rect.y, rect.width, rect.height); // detección de colisión
+
+          
+          //RECTANGULO CELESTE
+          if (rectUp2) { // movimiento de rectángulo
+            FillRect(rect1.x, rect1.y + rect1.height - 5, rect1.width, 5, 0x0000); // se colorea resto de rectángulo del frame anterior
+            rect1.y-= 5;
+            if (rect1.y <= 0) {
+              rectUp2 = false;
+            }
+          }
+          else {
+            FillRect(rect1.x, rect1.y, rect1.width, 5, 0x0000);
+            rect1.y+= 5;
+            if (rect1.y >= 200) {
+              rectUp2 = true;
+            }
+            if (collision2) { // se reemplaza el color al colisionar
+            rect1.color = 0xF800;
+          }
+          else {
+            LCD_Bitmap(banana2.x, banana2.y, banana2.width, banana2.height, bananaBitmap);
+          }
+          FillRect(rect1.x, rect1.y, rect1.width, rect1.height, rect1.color);
+
+          }  
+          collision2 = Collision(mono.x, mono.y, mono.width, mono.height,rect1.x, rect1.y, rect1.width, rect1.height); // detección de colisión
+          //collision2 = Collision(mono1.x, mono1.y, mono1.width, mono1.height,rect1.x, rect1.y, rect1.width, rect1.height); // detección de colisión
+          
+          
+          //RECTANGULO VIOLETA
+          if (rectUp3) { // movimiento de rectángulo
+            FillRect(rect2.x, rect2.y + rect2.height - 5, rect2.width, 5, 0x0000); // se colorea resto de rectángulo del frame anterior
+            rect2.y-= 5;
+            if (rect2.y <= 0) {
+              rectUp3 = false;
+            }
+          }
+          else {
+            FillRect(rect2.x, rect2.y, rect2.width, 5, 0x0000);
+            rect2.y+= 5;
+            if (rect2.y >= 200) {
+              rectUp3 = true;
+            }
+            if (collision3) { // se reemplaza el color al colisionar
+            rect2.color = 0xFFC300;
+          }
+          else {
+            LCD_Bitmap(banana3.x, banana3.y, banana3.width, banana3.height, bananaBitmap);
+          }
+          FillRect(rect2.x, rect2.y, rect2.width, rect2.height, rect2.color);
+          }  
+          collision3 = Collision(mono.x, mono.y, mono.width, mono.height,rect2.x, rect2.y, rect2.width, rect2.height); // detección de colisión
+          //collision3 = Collision(mono1.x, mono1.y, mono1.width, mono1.height,rect2.x, rect2.y, rect2.width, rect2.height);
+          
+
+          //RECTANGULO AMARILLO
+          if (rectUp4) { // movimiento de rectángulo
+            FillRect(rect3.x, rect3.y + rect3.height - 5, rect3.width, 5, 0x0000); // se colorea resto de rectángulo del frame anterior
+            rect3.y-= 5;
+            if (rect3.y <= 0) {
+              rectUp4 = false;
+            }
+          }
+          else {
+            FillRect(rect3.x, rect3.y, rect3.width, 5, 0x0000);
+            rect3.y+= 5;
+            if (rect3.y >= 200) {
+              rectUp4 = true;
+            }
+            if (collision4) { // se reemplaza el color al colisionar
+            rect3.color = 0xF800;
+          }
+          else {
+            LCD_Bitmap(banana4.x, banana4.y, banana4.width, banana4.height, bananaBitmap);
+          }
+          FillRect(rect3.x, rect3.y, rect3.width, rect3.height, rect3.color);
+          }  
+          collision4 = Collision(mono.x, mono.y, mono.width, mono.height,rect3.x, rect3.y, rect3.width, rect3.height); // detección de colisión
+          //collision4 = Collision(mono1.x, mono1.y, mono1.width, mono1.height,rect3.x, rect3.y, rect3.width, rect3.height);
+
+
+
+          //RECTANGULO VERDE
+          if (rectUp) { // movimiento de rectángulo
+            FillRect(rect.x, rect.y + rect.height - 5, rect.width, 5, 0x0000); // se colorea resto de rectángulo del frame anterior
+            rect.y-= 5;
+            if (rect.y <= 0) {
+              rectUp = false;
+            }
+          }
+          else {
+            FillRect(rect.x, rect.y, rect.width, 5, 0x0000);
+            rect.y+= 5;
+            if (rect.y >= 200) {
+              rectUp = true;
+            }
+            if (collision1_) { // se reemplaza el color al colisionar
+            rect.color = 0xF800;
+          }
+          else {
+            LCD_Bitmap(banana1.x, banana1.y, banana1.width, banana1.height, bananaBitmap);
+          }
+          FillRect(rect.x, rect.y, rect.width, rect.height, rect.color);
+          }  
+          //collision1 = Collision(mono.x, mono.y, mono.width, mono.height,rect.x, rect.y, rect.width, rect.height); // detección de colisión
+          collision1_ = Collision(mono1.x, mono1.y, mono1.width, mono1.height,rect.x, rect.y, rect.width, rect.height); // detección de colisión
+
+          
+          //RECTANGULO CELESTE
+          if (rectUp2) { // movimiento de rectángulo
+            FillRect(rect1.x, rect1.y + rect1.height - 5, rect1.width, 5, 0x0000); // se colorea resto de rectángulo del frame anterior
+            rect1.y-= 1;
+            if (rect1.y <= 0) {
+              rectUp2 = false;
+            }
+          }
+          else {
+            FillRect(rect1.x, rect1.y, rect1.width, 5, 0x0000);
+            rect1.y+= 1;
+            if (rect1.y >= 200) {
+              rectUp2 = true;
+            }
+            if (collision2_) { // se reemplaza el color al colisionar
+            rect1.color = 0xF800;
+          }
+          else {
+            LCD_Bitmap(banana2.x, banana2.y, banana2.width, banana2.height, bananaBitmap);
+          }
+          FillRect(rect1.x, rect1.y, rect1.width, rect1.height, rect1.color);
+
+          }  
+          //collision2 = Collision(mono.x, mono.y, mono.width, mono.height,rect1.x, rect1.y, rect1.width, rect1.height); // detección de colisión
+          collision2_ = Collision(mono1.x, mono1.y, mono1.width, mono1.height,rect1.x, rect1.y, rect1.width, rect1.height); // detección de colisión
+          
+          
+          //RECTANGULO VIOLETA
+          if (rectUp3) { // movimiento de rectángulo
+            FillRect(rect2.x, rect2.y + rect2.height - 5, rect2.width, 5, 0x0000); // se colorea resto de rectángulo del frame anterior
+            rect2.y-= 3;
+            if (rect2.y <= 0) {
+              rectUp3 = false;
+            }
+          }
+          else {
+            FillRect(rect2.x, rect2.y, rect2.width, 5, 0x0000);
+            rect2.y+= 3;
+            if (rect2.y >= 200) {
+              rectUp3 = true;
+            }
+            if (collision3_) { // se reemplaza el color al colisionar
+            rect2.color = 0xF800;
+          }
+          else {
+            LCD_Bitmap(banana3.x, banana3.y, banana3.width, banana3.height, bananaBitmap);
+          }
+          FillRect(rect2.x, rect2.y, rect2.width, rect2.height, rect2.color);
+          }  
+          //collision3 = Collision(mono.x, mono.y, mono.width, mono.height,rect2.x, rect2.y, rect2.width, rect2.height); // detección de colisión
+          collision3_ = Collision(mono1.x, mono1.y, mono1.width, mono1.height,rect2.x, rect2.y, rect2.width, rect2.height);
+          
+
+          //RECTANGULO AMARILLO
+          if (rectUp4) { // movimiento de rectángulo
+            FillRect(rect3.x, rect3.y + rect3.height - 5, rect3.width, 5, 0x0000); // se colorea resto de rectángulo del frame anterior
+            rect3.y-= 4;
+            if (rect3.y <= 0) {
+              rectUp4 = false;
+            }
+          }
+          else {
+            FillRect(rect3.x, rect3.y, rect3.width, 5, 0x0000);
+            rect3.y+= 4;
+            if (rect3.y >= 200) {
+              rectUp4 = true;
+            }
+            if (collision4_) { // se reemplaza el color al colisionar
+            rect3.color = 0xF800;
+          }
+          else {
+            LCD_Bitmap(banana4.x, banana4.y, banana4.width, banana4.height, bananaBitmap);
+          }
+          FillRect(rect3.x, rect3.y, rect3.width, rect3.height, rect3.color);
+          }  
+          //collision4 = Collision(mono.x, mono.y, mono.width, mono.height,rect3.x, rect3.y, rect3.width, rect3.height); // detección de colisión
+          collision4_ = Collision(mono1.x, mono1.y, mono1.width, mono1.height,rect3.x, rect3.y, rect3.width, rect3.height);
+        
+          
+          if (mono.flip == 1){ // dependiendo de la dirección, se colorea resto del sprite del frame anterior
+            FillRect(mono.x - 4, mono.y, 4, mono.height, 0x0000);
+          }
+          else{
+            FillRect(mono.x + mono.width, mono.y, 4, mono.height, 0x0000);
+          }
+          LCD_Sprite(mono.x, mono.y, mono.width, mono.height, monoBitmap, mono.columns, mono.index, mono.flip, mono.offset);
+
+          if (mono1.flip == 0){ // dependiendo de la dirección, se colorea resto del sprite del frame anterior
+            FillRect(mono1.x - 4, mono1.y, 4, mono1.height, 0x0000);
+          }
+          else{
+            FillRect(mono1.x + mono1.width, mono1.y, 4, mono1.height, 0x0000);
+          }
+          LCD_Sprite(mono1.x, mono1.y, mono1.width, mono1.height, mono1Bitmap, mono1.columns, mono1.index, mono1.flip, mono1.offset);
+
+//Condición para determinar al ganador
+          if (mono.x + mono.width >= 320 || mono1.x + mono1.width >= 320) {
+            if (mono.x + mono.width >= 320 && mono1.x + mono1.width >= 320) {
+              ShowResult("Empate");
+            } else if (mono.x + mono.width >= 320) {
+              ShowResult("Jugador 1 gano");
+            } else {
+              ShowResult("Jugador 2 gano");
+            }
+            
+            // Espera 3 segundos
+            delay(3000);
+        
+            // Restablece el juego
+            LCD_Clear(0x0000);
+            mono.x = 0;
+            mono.y = 50;
+            mono1.x = 0;
+            mono1.y = 150;
+            
+          }         
+//Condición para perdedor
+          if (collision1 || collision2 || collision3 || collision4 || collision1_ || collision2_ || collision3_ || collision4_) {
+            ShowGameOverMessage();
+            delay(3000); // Espera 3 segundos
+            LCD_Clear(0x0000); 
+            mono.x = 0;
+            mono.y = 50;
+            mono1.x = 0;
+            mono1.y = 150;
+            }
+
+  }
+
+
+ 
+}
+//***************************************************************************************************************************************
+// Función para inicializar LCD
+//***************************************************************************************************************************************
+void LCD_Init(void) {
+  pinMode(LCD_RST, OUTPUT);
+  pinMode(LCD_CS, OUTPUT);
+  pinMode(LCD_RS, OUTPUT);
+  pinMode(LCD_WR, OUTPUT);
+  pinMode(LCD_RD, OUTPUT);
+  for (uint8_t i = 0; i < 8; i++){
+    pinMode(DPINS[i], OUTPUT);
+  }
+  //****************************************
+  // Secuencia de Inicialización
+  //****************************************
+  digitalWrite(LCD_CS, HIGH);
+  digitalWrite(LCD_RS, HIGH);
+  digitalWrite(LCD_WR, HIGH);
+  digitalWrite(LCD_RD, HIGH);
+  digitalWrite(LCD_RST, HIGH);
+  delay(5);
+  digitalWrite(LCD_RST, LOW);
+  delay(20);
+  digitalWrite(LCD_RST, HIGH);
+  delay(150);
+  digitalWrite(LCD_CS, LOW);
+  //****************************************
+  LCD_CMD(0xE9);  // SETPANELRELATED
+  LCD_DATA(0x20);
+  //****************************************
+  LCD_CMD(0x11); // Exit Sleep SLEEP OUT (SLPOUT)
+  delay(100);
+  //****************************************
+  LCD_CMD(0xD1);    // (SETVCOM)
+  LCD_DATA(0x00);
+  LCD_DATA(0x71);
+  LCD_DATA(0x19);
+  //****************************************
+  LCD_CMD(0xD0);   // (SETPOWER) 
+  LCD_DATA(0x07);
+  LCD_DATA(0x01);
+  LCD_DATA(0x08);
+  //****************************************
+  LCD_CMD(0x36);  // (MEMORYACCESS)
+  LCD_DATA(0x40|0x80|0x20|0x08); // LCD_DATA(0x19);
+  //****************************************
+  LCD_CMD(0x3A); // Set_pixel_format (PIXELFORMAT)
+  LCD_DATA(0x05); // color setings, 05h - 16bit pixel, 11h - 3bit pixel
+  //****************************************
+  LCD_CMD(0xC1);    // (POWERCONTROL2)
+  LCD_DATA(0x10);
+  LCD_DATA(0x10);
+  LCD_DATA(0x02);
+  LCD_DATA(0x02);
+  //****************************************
+  LCD_CMD(0xC0); // Set Default Gamma (POWERCONTROL1)
+  LCD_DATA(0x00);
+  LCD_DATA(0x35);
+  LCD_DATA(0x00);
+  LCD_DATA(0x00);
+  LCD_DATA(0x01);
+  LCD_DATA(0x02);
+  //****************************************
+  LCD_CMD(0xC5); // Set Frame Rate (VCOMCONTROL1)
+  LCD_DATA(0x04); // 72Hz
+  //****************************************
+  LCD_CMD(0xD2); // Power Settings  (SETPWRNORMAL)
+  LCD_DATA(0x01);
+  LCD_DATA(0x44);
+  //****************************************
+  LCD_CMD(0xC8); //Set Gamma  (GAMMASET)
+  LCD_DATA(0x04);
+  LCD_DATA(0x67);
+  LCD_DATA(0x35);
+  LCD_DATA(0x04);
+  LCD_DATA(0x08);
+  LCD_DATA(0x06);
+  LCD_DATA(0x24);
+  LCD_DATA(0x01);
+  LCD_DATA(0x37);
+  LCD_DATA(0x40);
+  LCD_DATA(0x03);
+  LCD_DATA(0x10);
+  LCD_DATA(0x08);
+  LCD_DATA(0x80);
+  LCD_DATA(0x00);
+  //****************************************
+  LCD_CMD(0x2A); // Set_column_address 320px (CASET)
+  LCD_DATA(0x00);
+  LCD_DATA(0x00);
+  LCD_DATA(0x01);
+  LCD_DATA(0x3F);
+  //****************************************
+  LCD_CMD(0x2B); // Set_page_address 480px (PASET)
+  LCD_DATA(0x00);
+  LCD_DATA(0x00);
+  LCD_DATA(0x01);
+  LCD_DATA(0xE0);
+//  LCD_DATA(0x8F);
+  LCD_CMD(0x29); //display on 
+  LCD_CMD(0x2C); //display on
+
+  LCD_CMD(ILI9341_INVOFF); //Invert Off
+  delay(120);
+  LCD_CMD(ILI9341_SLPOUT);    //Exit Sleep
+  delay(120);
+  LCD_CMD(ILI9341_DISPON);    //Display on
+  digitalWrite(LCD_CS, HIGH);
+}
+//***************************************************************************************************************************************
+// Función para enviar comandos a la LCD - parámetro (comando)
+//***************************************************************************************************************************************
+void LCD_CMD(uint8_t cmd) {
+  digitalWrite(LCD_RS, LOW);
+  digitalWrite(LCD_WR, LOW);
+  GPIO_PORTB_DATA_R = cmd;
+  digitalWrite(LCD_WR, HIGH);
+}
+//***************************************************************************************************************************************
+// Función para enviar datos a la LCD - parámetro (dato)
+//***************************************************************************************************************************************
+void LCD_DATA(uint8_t data) {
+  digitalWrite(LCD_RS, HIGH);
+  digitalWrite(LCD_WR, LOW);
+  GPIO_PORTB_DATA_R = data;
+  digitalWrite(LCD_WR, HIGH);
+}
+//***************************************************************************************************************************************
+// Función para definir rango de direcciones de memoria con las cuales se trabajara (se define una ventana)
+//***************************************************************************************************************************************
+void SetWindows(unsigned int x1, unsigned int y1, unsigned int x2, unsigned int y2) {
+  LCD_CMD(0x2a); // Set_column_address 4 parameters
+  LCD_DATA(x1 >> 8);
+  LCD_DATA(x1);   
+  LCD_DATA(x2 >> 8);
+  LCD_DATA(x2);   
+  LCD_CMD(0x2b); // Set_page_address 4 parameters
+  LCD_DATA(y1 >> 8);
+  LCD_DATA(y1);   
+  LCD_DATA(y2 >> 8);
+  LCD_DATA(y2);   
+  LCD_CMD(0x2c); // Write_memory_start
+}
+//***************************************************************************************************************************************
+// Función para borrar la pantalla - parámetros (color)
+//***************************************************************************************************************************************
+void LCD_Clear(unsigned int c){  
+  unsigned int x, y;
+  LCD_CMD(0x02c); // write_memory_start
+  digitalWrite(LCD_RS, HIGH);
+  digitalWrite(LCD_CS, LOW);   
+  SetWindows(0, 0, 319, 239); // 479, 319);
+  for (x = 0; x < 320; x++)
+    for (y = 0; y < 240; y++) {
+      LCD_DATA(c >> 8); 
+      LCD_DATA(c); 
+    }
+  digitalWrite(LCD_CS, HIGH);
+} 
+//***************************************************************************************************************************************
+// Función para dibujar una línea horizontal - parámetros ( coordenada x, cordenada y, longitud, color)
+//*************************************************************************************************************************************** 
+void H_line(unsigned int x, unsigned int y, unsigned int l, unsigned int c) {  
+  unsigned int i, j;
+  LCD_CMD(0x02c); //write_memory_start
+  digitalWrite(LCD_RS, HIGH);
+  digitalWrite(LCD_CS, LOW);
+  l = l + x;
+  SetWindows(x, y, l, y);
+  j = l;// * 2;
+  for (i = 0; i < l; i++) {
+      LCD_DATA(c >> 8); 
+      LCD_DATA(c); 
+  }
+  digitalWrite(LCD_CS, HIGH);
+}
+//***************************************************************************************************************************************
+// Función para dibujar una línea vertical - parámetros ( coordenada x, cordenada y, longitud, color)
+//*************************************************************************************************************************************** 
+void V_line(unsigned int x, unsigned int y, unsigned int l, unsigned int c) {  
+  unsigned int i,j;
+  LCD_CMD(0x02c); //write_memory_start
+  digitalWrite(LCD_RS, HIGH);
+  digitalWrite(LCD_CS, LOW);
+  l = l + y;
+  SetWindows(x, y, x, l);
+  j = l; //* 2;
+  for (i = 1; i <= j; i++) {
+    LCD_DATA(c >> 8); 
+    LCD_DATA(c);
+  }
+  digitalWrite(LCD_CS, HIGH);  
+}
+//***************************************************************************************************************************************
+// Función para dibujar un rectángulo - parámetros ( coordenada x, cordenada y, ancho, alto, color)
+//***************************************************************************************************************************************
+void Rect(unsigned int x, unsigned int y, unsigned int w, unsigned int h, unsigned int c) {
+  H_line(x  , y  , w, c);
+  H_line(x  , y+h, w, c);
+  V_line(x  , y  , h, c);
+  V_line(x+w, y  , h, c);
+}
+//***************************************************************************************************************************************
+// Función para dibujar un rectángulo relleno - parámetros ( coordenada x, cordenada y, ancho, alto, color)
+//***************************************************************************************************************************************
+void FillRect(unsigned int x, unsigned int y, unsigned int w, unsigned int h, unsigned int c) {
+  LCD_CMD(0x02c); // write_memory_start
+  digitalWrite(LCD_RS, HIGH);
+  digitalWrite(LCD_CS, LOW); 
+  
+  unsigned int x2, y2;
+  x2 = x+w;
+  y2 = y+h;
+  SetWindows(x, y, x2-1, y2-1);
+  unsigned int k = w*h*2-1;
+  unsigned int i, j;
+  for (int i = 0; i < w; i++) {
+    for (int j = 0; j < h; j++) {
+      LCD_DATA(c >> 8);
+      LCD_DATA(c); 
+      k = k - 2;
+     } 
+  }
+  digitalWrite(LCD_CS, HIGH);
+}
+//***************************************************************************************************************************************
+// Función para dibujar texto - parámetros ( texto, coordenada x, cordenada y, color, background) 
+//***************************************************************************************************************************************
+void LCD_Print(String text, int x, int y, int fontSize, int color, int background) {
+  int fontXSize ;
+  int fontYSize ;
+  
+  if(fontSize == 1){
+    fontXSize = fontXSizeSmal ;
+    fontYSize = fontYSizeSmal ;
+  }
+  if(fontSize == 2){
+    fontXSize = fontXSizeBig ;
+    fontYSize = fontYSizeBig ;
+  }
+  
+  char charInput ;
+  int cLength = text.length();
+  Serial.println(cLength,DEC);
+  int charDec ;
+  int c ;
+  int charHex ;
+  char char_array[cLength+1];
+  text.toCharArray(char_array, cLength+1) ;
+  for (int i = 0; i < cLength ; i++) {
+    charInput = char_array[i];
+    Serial.println(char_array[i]);
+    charDec = int(charInput);
+    digitalWrite(LCD_CS, LOW);
+    SetWindows(x + (i * fontXSize), y, x + (i * fontXSize) + fontXSize - 1, y + fontYSize );
+    long charHex1 ;
+    for ( int n = 0 ; n < fontYSize ; n++ ) {
+      if (fontSize == 1){
+        charHex1 = pgm_read_word_near(smallFont + ((charDec - 32) * fontYSize) + n);
+      }
+      if (fontSize == 2){
+        charHex1 = pgm_read_word_near(bigFont + ((charDec - 32) * fontYSize) + n);
+      }
+      for (int t = 1; t < fontXSize + 1 ; t++) {
+        if (( charHex1 & (1 << (fontXSize - t))) > 0 ) {
+          c = color ;
+        } else {
+          c = background ;
+        }
+        LCD_DATA(c >> 8);
+        LCD_DATA(c);
+      }
+    }
+    digitalWrite(LCD_CS, HIGH);
+  }
+}
+//***************************************************************************************************************************************
+// Función para dibujar una imagen a partir de un arreglo de colores (Bitmap) Formato (Color 16bit R 5bits G 6bits B 5bits)
+//***************************************************************************************************************************************
+void LCD_Bitmap(unsigned int x, unsigned int y, unsigned int width, unsigned int height, unsigned char bitmap[]){  
+  LCD_CMD(0x02c); // write_memory_start
+  digitalWrite(LCD_RS, HIGH);
+  digitalWrite(LCD_CS, LOW); 
+  
+  unsigned int x2, y2;
+  x2 = x+width;
+  y2 = y+height;
+  SetWindows(x, y, x2-1, y2-1);
+  unsigned int k = 0;
+  unsigned int i, j;
+
+  for (int i = 0; i < width; i++) {
+    for (int j = 0; j < height; j++) {
+      LCD_DATA(bitmap[k]);
+      LCD_DATA(bitmap[k+1]);
+      //LCD_DATA(bitmap[k]);    
+      k = k + 2;
+     } 
+  }
+  digitalWrite(LCD_CS, HIGH);
+}
+//***************************************************************************************************************************************
+// Función para dibujar una imagen sprite - los parámetros columns = número de imagenes en el sprite, index = cual desplegar, flip = darle vuelta
+//***************************************************************************************************************************************
+void LCD_Sprite(int x, int y, int width, int height, unsigned char bitmap[],int columns, int index, char flip, char offset){
+  LCD_CMD(0x02c); // write_memory_start
+  digitalWrite(LCD_RS, HIGH);
+  digitalWrite(LCD_CS, LOW); 
+
+  unsigned int x2, y2;
+  x2 =   x+width;
+  y2=    y+height;
+  SetWindows(x, y, x2-1, y2-1);
+  int k = 0;
+  int ancho = ((width*columns));
+  if(flip){
+    for (int j = 0; j < height; j++){
+        k = (j*(ancho) + index*width -1 - offset)*2;
+        k = k+width*2;
+       for (int i = 0; i < width; i++){
+        LCD_DATA(bitmap[k]);
+        LCD_DATA(bitmap[k+1]);
+        k = k - 2;
+       } 
+    }
+  }
+  else{
+     for (int j = 0; j < height; j++){
+      k = (j*(ancho) + index*width + 1 + offset)*2;
+     for (int i = 0; i < width; i++){
+      LCD_DATA(bitmap[k]);
+      LCD_DATA(bitmap[k+1]);
+      k = k + 2;
+     } 
+    }
+  }
+  digitalWrite(LCD_CS, HIGH);
+}
