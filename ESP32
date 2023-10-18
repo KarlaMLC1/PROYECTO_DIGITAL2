@@ -1,0 +1,91 @@
+#include <esp_now.h>
+#include <WiFi.h>
+
+const int buttonPin = 2;  // Pin del botón (GPIO2)
+const int buttonPin2 = 15;  // Pin del botón (GPIO4)
+int buttonState;          // Variable para almacenar el estado del botón
+int valueToSave = 0;      // Variable donde se guardará el valor
+int buttonState2;          // Variable para almacenar el estado del botón
+int valueToSave2 = 0;      // Variable donde se guardará el valor
+
+//Dirección de ESP82
+uint8_t slaveAddress[] = {0x2C, 0x3A, 0xE8, 0x29, 0x47, 0x3E};
+
+//Estructura de variables
+typedef struct Botones {
+  float BotonJ1;
+  float BotonMusica;
+};
+Botones dhtData;
+
+//Función comunicación 
+void OnSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.print("\r\nSend message status:\t");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Sent Successfully" : "Sent Failed"); //reporta si se logra o no
+}
+ 
+void setup() {
+  // inicia monitor serial
+  Serial.begin(115200);
+
+  pinMode(buttonPin, INPUT_PULLUP);
+
+//inicializacion de ESP-NOW
+  WiFi.mode(WIFI_STA);
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("There was an error initializing ESP-NOW");
+    return;
+  }
+  esp_now_register_send_cb(OnSent);
+  esp_now_peer_info_t slaveInfo;
+  memcpy(slaveInfo.peer_addr, slaveAddress, 6);
+  slaveInfo.channel = 0;  
+  slaveInfo.encrypt = false;
+       
+  if (esp_now_add_peer(&slaveInfo) != ESP_OK){
+    Serial.println("There was an error registering the slave");
+    return;
+  }
+}
+
+void loop() {
+//Lectura de botones
+  buttonState = digitalRead(buttonPin); // Lee el estado del botón
+  buttonState2 = digitalRead(buttonPin2); // Lee el estado del botón
+  
+//condiciones de los botones
+  if (buttonState == LOW) { // Si el botón está presionado
+    valueToSave = 1;        // Guarda el valor 1 en la variable
+    Serial.println("Botón presionado");
+  } else {
+    valueToSave = 0;        // Guarda el valor 0 en la variable
+  }
+
+  delay(10);
+
+  if (buttonState2 == LOW) { // Si el botón está presionado
+    valueToSave2 = 1;        // Guarda el valor 1 en la variable
+    Serial.println("Botón presionado");
+  } else {
+    valueToSave2 = 0;        // Guarda el valor 0 en la variable
+  }
+
+  delay(20);
+  //guarda los valores en las variables de la estructura que se enviara
+  dhtData.BotonJ1 = valueToSave;
+  dhtData.BotonMusica = valueToSave2;
+
+  // Envio de valores 
+  esp_err_t result = esp_now_send(slaveAddress, (uint8_t *) &dhtData, sizeof(dhtData));
+
+   //verifica si hay error en el envio
+  if (result == ESP_OK) {
+    Serial.println("The message was sent sucessfully.");
+  }
+  else {
+    Serial.println("There was an error sending the message.");
+  }
+  delay(200);
+}
+
+
